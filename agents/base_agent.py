@@ -28,26 +28,26 @@ class BaseAgent:
 You have access to the following functions: [{tool_names}].
 Use these EXACT function names when calling tools.
 
-### FUNCTION CALLING
-You can call functions to help users. The system will handle tool execution and return results.
-
-### FALLBACK FORMAT (only if native tool calling is unavailable)
-If the system doesn't support native function calls, output:
+### HOW TO CALL FUNCTIONS
+To call a function, output ONLY the function call in this format:
 functools[{{"name": "function_name", "arguments": {{"arg": "value"}}}}]
 
+Do NOT output any other text when calling a function - just the functools block.
+
 ### RULES
-1. When calling a function, do not add extra commentary before executing.
-2. After receiving tool results, acknowledge them naturally to the user.
-3. Do not regenerate content that was already created by a tool.
-4. If the user's request doesn't require a tool, respond conversationally.
+1. Output ONLY the functools block when calling a function (no extra text).
+2. Do NOT wrap in markdown code blocks.
+3. After receiving tool results, acknowledge them naturally to the user.
+4. Do NOT regenerate content that was already created by a tool.
+5. If the user's request doesn't require a tool, respond conversationally.
 
 ### EXAMPLES
 
 User: "Generate a quiz about space."
-Action: Call generate_new_quiz with topic="space"
+functools[{{"name": "generate_new_quiz", "arguments": {{"topic": "space"}}}}]
 
 User: "Help me."
-Response: How can I help you today?
+How can I help you today?
 """
 
     def run(self, message: str) -> str:
