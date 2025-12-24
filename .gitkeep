@@ -1,0 +1,2 @@
+touch data/quizzes/.gitkeep
+touch data/responses/.gitkeep
