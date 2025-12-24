@@ -1,6 +1,10 @@
 import json
+import logging
 import re
 from typing import List, Dict, Any, Optional
+
+# Configure logging for fallback detection
+logger = logging.getLogger(__name__)
 
 class BaseAgent:
     def __init__(self, name: str, client, model_id: str, tools: Optional[List] = None, available_tools: Optional[Dict] = None, max_tokens: int = 2048):
@@ -8,38 +12,42 @@ class BaseAgent:
         self.client = client
         self.model_id = model_id
         self.tools = tools
-        self.available_tools = available_tools or {} 
+        self.available_tools = available_tools or {}
         self.history = []
         self.max_tokens = max_tokens
-        
+
         # Dynamic tool list
         tool_names = ", ".join(f"'{name}'" for name in self.available_tools.keys())
-        
-        # --- FEW-SHOT PROMPT ---
-        self.system_prompt = f"""You are {name}, a function-calling AI.
+
+        # --- SYSTEM PROMPT ---
+        # Note: The model should use native function calling via the tools API.
+        # The functools format below is a FALLBACK for servers that don't return structured tool_calls.
+        self.system_prompt = f"""You are {name}, a function-calling AI assistant.
 
 ### AVAILABLE TOOLS
 You have access to the following functions: [{tool_names}].
-You MUST use these EXACT names.
+Use these EXACT function names when calling tools.
 
-### INSTRUCTIONS
-To call a tool, you must output a JSON list with the specific prefix 'functools'.
-Format: functools[{{"name": "exact_tool_name", "arguments": {{"arg": "value"}}}}]
+### FUNCTION CALLING
+You can call functions to help users. The system will handle tool execution and return results.
+
+### FALLBACK FORMAT (only if native tool calling is unavailable)
+If the system doesn't support native function calls, output:
+functools[{{"name": "function_name", "arguments": {{"arg": "value"}}}}]
 
 ### RULES
-1. Output ONLY the functools block when you want to CALL a function.
-2. Do not wrap the output in markdown (NO ```json).
-3. Do not include introductory text.
-4. IMPORTANT: When the tool execution is complete, the tool will return a confirmation message. You should simply acknowledge this to the user. Do not regenerate the content.
+1. When calling a function, do not add extra commentary before executing.
+2. After receiving tool results, acknowledge them naturally to the user.
+3. Do not regenerate content that was already created by a tool.
+4. If the user's request doesn't require a tool, respond conversationally.
 
-### EXAMPLES (Follow these strictly)
+### EXAMPLES
 
 User: "Generate a quiz about space."
-Bad Response: ```json [{{ "name": "generate_new_quiz", ... }}] ```
-Correct Response: functools[{{"name": "generate_new_quiz", "arguments": {{"topic": "space"}}}}]
+Action: Call generate_new_quiz with topic="space"
 
 User: "Help me."
-Correct Response: How can I help you today?
+Response: How can I help you today?
 """
 
     def run(self, message: str) -> str:
@@ -47,7 +55,7 @@ Correct Response: How can I help you today?
         # Structure: [System, ...OldHistory..., User]
         current_turn_messages = [{"role": "user", "content": message}]
         messages = [{"role": "system", "content": self.system_prompt}] + self.history + current_turn_messages
-        
+
         # 2. Call Model
         response = self.client.chat.completions.create(
             model=self.model_id,
@@ -56,34 +64,36 @@ Correct Response: How can I help you today?
             tool_choice="auto",
             temperature=0.0
         )
-        
+
         response_msg = response.choices[0].message
         content = response_msg.content or ""
 
         # --- HYBRID PARSING LOGIC ---
         tool_calls = response_msg.tool_calls
-        
+
         if not tool_calls:
             manual_calls = self._extract_functools(content)
             if manual_calls:
                 print(f"  ⚠️ Server missed call. Parsing manually...")
                 tool_calls = manual_calls
-                response_msg.content = None 
+                response_msg.content = None
 
         # 3. Execution Loop
         while tool_calls:
             print(f"  ⚙️  {self.name} is calling a tool...")
-            
-            if response_msg.content and "functools" in response_msg.content:
-                response_msg.content = "" 
 
-            # Add the Assistant's "Call" to the local turn
-            messages.append(response_msg)
-            current_turn_messages.append(response_msg)
-            
+            # Normalize and add the Assistant's "Call" to the local turn
+            # Clear functools content from display since it's being processed as a tool call
+            assistant_msg = self._normalize_assistant_message(response_msg)
+            if assistant_msg.get("content") and "functools" in assistant_msg["content"]:
+                assistant_msg["content"] = None
+
+            messages.append(assistant_msg)
+            current_turn_messages.append(assistant_msg)
+
             for tool_call in tool_calls:
                 func_name = tool_call.function.name
-                
+
                 # Robust Argument Parsing
                 if isinstance(tool_call.function.arguments, str):
                     try:
@@ -92,7 +102,7 @@ Correct Response: How can I help you today?
                         args = tool_call.function.arguments
                 else:
                     args = tool_call.function.arguments
-                
+
                 if func_name in self.available_tools:
                     print(f"  🔧 Executing {func_name}...")
                     try:
@@ -103,59 +113,122 @@ Correct Response: How can I help you today?
                 else:
                     tool_result = f"Error: Tool '{func_name}' not found."
 
-                # Create the Tool Result Message
+                # Create the Tool Result Message (include name for compatibility)
                 tool_msg = {
                     "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": str(tool_result)
+                    "name": func_name,
+                    "tool_call_id": getattr(tool_call, "id", None),
+                    "content": json.dumps(tool_result) if not isinstance(tool_result, str) else tool_result
                 }
-                
+
                 # Add Tool Result to local turn
                 messages.append(tool_msg)
                 current_turn_messages.append(tool_msg)
 
-            # Call Model Again
+            # Call Model Again (same parameters for consistency)
             response = self.client.chat.completions.create(
                 model=self.model_id,
                 messages=messages,
-                tools=self.tools
+                tools=self.tools,
+                tool_choice="auto",
+                temperature=0.0
             )
             response_msg = response.choices[0].message
             content = response_msg.content or ""
-            
+
             # Re-check for new calls
             tool_calls = response_msg.tool_calls
             if not tool_calls:
-                 tool_calls = self._extract_functools(content)
+                tool_calls = self._extract_functools(content)
 
         # 4. Final Response & History Update
         final_content = response_msg.content
         if not final_content or not final_content.strip():
-             final_content = "Task completed successfully."
-             response_msg.content = final_content
+            final_content = "Task completed successfully."
 
-        current_turn_messages.append(response_msg)
-        
+        # Normalize final message before appending to history
+        final_msg = self._normalize_assistant_message(response_msg)
+        if not final_msg.get("content"):
+            final_msg["content"] = final_content
+
+        current_turn_messages.append(final_msg)
+
         # Save the FULL chain to history
         self.history.extend(current_turn_messages)
-        
+
         return final_content
 
+    def _normalize_assistant_message(self, response_msg) -> Dict[str, Any]:
+        """Convert response message object to a normalized dict for API compatibility."""
+        msg = {
+            "role": "assistant",
+            "content": getattr(response_msg, "content", None)
+        }
+
+        # Handle native tool_calls if present
+        if hasattr(response_msg, "tool_calls") and response_msg.tool_calls:
+            msg["tool_calls"] = [
+                {
+                    "id": getattr(tc, "id", f"call_{tc.function.name}"),
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments if isinstance(tc.function.arguments, str) else json.dumps(tc.function.arguments)
+                    }
+                }
+                for tc in response_msg.tool_calls
+            ]
+
+        # Handle legacy function_call if present (OpenAI v1 compatibility)
+        if hasattr(response_msg, "function_call") and response_msg.function_call:
+            msg["function_call"] = {
+                "name": response_msg.function_call.name,
+                "arguments": response_msg.function_call.arguments
+            }
+
+        return msg
+
     def _extract_functools(self, text: str):
-        if not text: return None
+        """
+        Fallback parser for when the server doesn't return structured tool_calls.
+        This is a workaround for servers with incomplete function-calling support.
+        Should be removed once the server reliably supplies tool_calls.
+        """
+        if not text:
+            return None
+
+        # Clean markdown wrappers
         clean_text = re.sub(r'```(?:json|python)?', '', text)
         clean_text = re.sub(r'```', '', clean_text)
-        match = re.search(r'functools\s*(\[.*?\])', clean_text, re.DOTALL)
-        
-        if match:
-            try:
-                json_str = match.group(1)
-                data = json.loads(json_str)
-                class MockToolCall:
-                    def __init__(self, name, args):
-                        self.id = "call_manual_" + name
-                        self.function = type('obj', (object,), {'name': name, 'arguments': args})
-                return [MockToolCall(d['name'], d['arguments']) for d in data]
-            except Exception:
-                pass
+
+        # Try multiple patterns for robustness
+        patterns = [
+            r'functools\s*(\[.*?\])',           # Standard format
+            r'functools\s*(\[\s*\{.*?\}\s*\])', # With extra whitespace
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, clean_text, re.DOTALL)
+            if match:
+                try:
+                    json_str = match.group(1)
+                    data = json.loads(json_str)
+
+                    # Log that we're using fallback parsing
+                    logger.warning(
+                        f"[{self.name}] Using fallback functools parser. "
+                        "Server did not return structured tool_calls. "
+                        "Consider upgrading server or checking streaming bug (#346)."
+                    )
+
+                    class MockToolCall:
+                        def __init__(self, name, args):
+                            self.id = f"call_manual_{name}"
+                            self.function = type('obj', (object,), {'name': name, 'arguments': args})()
+
+                    return [MockToolCall(d['name'], d.get('arguments', {})) for d in data]
+                except (json.JSONDecodeError, KeyError, TypeError) as e:
+                    logger.debug(f"[{self.name}] Fallback parser failed: {e}")
+                    continue
+
         return None
