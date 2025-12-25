@@ -1,44 +1,62 @@
-import json
-from .base_agent import BaseAgent
+"""Review Agent - Reviews quiz results and helps users learn."""
 
-class ReviewAgent(BaseAgent):
-    def __init__(self, client, model_id, quiz_data, user_responses):
-        super().__init__("Reviewer", client, model_id)
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class ReviewAgent:
+    """Reviews quiz results and provides educational feedback."""
+    
+    def __init__(self, client, model_id: str, quiz_data: dict, user_responses: dict):
+        self.client = client
+        self.model_id = model_id
+        self.history = []
         
-        # We format the data into a readable string for the System Prompt
-        context_str = self._format_context(quiz_data, user_responses)
-        
-        self.system_prompt = f"""You are a Quiz Review Tutor.
-Your goal is to help the user understand their mistakes and reinforce their learning.
+        context = self._format_context(quiz_data, user_responses)
+        self.system_prompt = f"""You are a helpful Quiz Review Tutor.
 
-### QUIZ DATA
-{context_str}
+## Quiz Data
+{context}
 
-### INSTRUCTIONS
-1. Analyze the user's answers against the correct answers.
-2. Provide a summary of their score (e.g., "You got 2/3 correct").
-3. For each incorrect answer, explain WHY it is wrong and what the correct answer is.
-4. Be encouraging but educational.
-5. After the initial review, answer any follow-up questions the user has about the topic.
+## Instructions
+1. Provide a clear score summary (e.g., "You scored 3/5")
+2. For incorrect answers, explain why and provide the correct answer
+3. Be encouraging and educational
+4. Answer follow-up questions about the topic
 """
 
-    def _format_context(self, quiz_data, user_responses):
-        """Helper to convert JSON data into a clean text block for the prompt."""
-        text = f"TOPIC: {quiz_data.get('topic', 'Unknown')}\n\n"
+    def _format_context(self, quiz_data: dict, user_responses: dict) -> str:
+        """Format quiz data and user responses into context string."""
+        lines = [f"Topic: {quiz_data.get('topic', 'Unknown')}"]
         
-        # Create a lookup for correct answers
         questions = quiz_data.get('questions', [])
+        user_answers = {ans['question_id']: ans['selected_option'] for ans in user_responses.get('answers', [])}
         
-        text += "--- QUESTIONS & CORRECT ANSWERS ---\n"
-        for i, q in enumerate(questions):
-            text += f"Q{i+1}: {q['question']}\n"
-            text += f"   Options: {', '.join(q['options'])}\n"
-            text += f"   Correct Answer: {q['correct']}\n\n"
+        for i, q in enumerate(questions, 1):
+            user_ans = user_answers.get(i, "No answer")
+            is_correct = user_ans.startswith(q['correct']) if user_ans != "No answer" else False
+            status = "✓" if is_correct else "✗"
             
-        text += "--- USER RESPONSES ---\n"
-        # We assume user_responses is the loaded JSON from the results file
-        answers = user_responses.get('answers', [])
-        for ans in answers:
-            text += f"Q{ans['question_id']}: User selected '{ans['selected_option']}'\n"
-            
-        return text
+            lines.append(f"\nQ{i}: {q['question']}")
+            lines.append(f"Options: {', '.join(q['options'])}")
+            lines.append(f"Correct: {q['correct']} | User: {user_ans} {status}")
+        
+        return "\n".join(lines)
+
+    def run(self, message: str) -> str:
+        """Process user message and return response."""
+        self.history.append({"role": "user", "content": message})
+        
+        messages = [{"role": "system", "content": self.system_prompt}] + self.history
+        
+        response = self.client.chat.completions.create(
+            model=self.model_id,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=2048
+        )
+        
+        content = response.choices[0].message.content
+        self.history.append({"role": "assistant", "content": content})
+        return content

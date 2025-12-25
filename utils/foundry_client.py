@@ -1,23 +1,27 @@
+"""Foundry Client - Connect to Foundry Local or manual OpenAI-compatible server."""
+
 import os
+import logging
 from openai import OpenAI
 
-# Try to import Foundry, fallback if missing (good for testing)
+logger = logging.getLogger(__name__)
+
 try:
     from foundry_local import FoundryLocalManager
-    USING_FOUNDRY = True
+    FOUNDRY_AVAILABLE = True
 except ImportError:
-    USING_FOUNDRY = False
+    FOUNDRY_AVAILABLE = False
 
-MODEL_ALIAS = "phi-4-cuda-gpu"
+DEFAULT_MODEL_ALIAS = "qwen2.5-7b"
+
 
 def get_client():
-    """Returns a configured OpenAI client pointing to Foundry Local."""
-    if USING_FOUNDRY:
-        manager = FoundryLocalManager(MODEL_ALIAS)
-        return OpenAI(
-            base_url=manager.endpoint,
-            api_key=manager.api_key
-        ), manager.get_model_info(MODEL_ALIAS).id
-    else:
-        # Fallback for manual local servers (like Llama.cpp or manual Foundry start)
-        return OpenAI(base_url="http://localhost:8000/v1", api_key="none"), MODEL_ALIAS
+    """Get OpenAI client and model ID."""
+    if FOUNDRY_AVAILABLE:
+        logger.info(f"Connecting via Foundry Local (model: {DEFAULT_MODEL_ALIAS})...")
+        manager = FoundryLocalManager(DEFAULT_MODEL_ALIAS)
+        client = OpenAI(base_url=manager.endpoint, api_key=manager.api_key)
+        model_id = manager.get_model_info(DEFAULT_MODEL_ALIAS).id
+        logger.info(f"Connected to Foundry Local - Model ID: {model_id}")
+        return client, model_id
+    

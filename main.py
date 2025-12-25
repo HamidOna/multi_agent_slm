@@ -1,38 +1,42 @@
-import sys
+#!/usr/bin/env python3
+"""Quiz App - Multi-Agent Orchestrator with Function Calling."""
+
+import logging
 from utils.foundry_client import get_client
 from agents.base_agent import BaseAgent
 from tools.generator_tools import generate_new_quiz
 from tools.interface_tools import launch_quiz_interface
 from tools.review_tools import review_quiz_interface
 
-# --- CONFIGURATION ---
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("gradio").setLevel(logging.WARNING)
 
-# 1. Define the Tool Definitions (Schema)
 TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
             "name": "generate_new_quiz",
-            "description": "CREATES and SAVES a quiz to a JSON file.",
+            "description": "Creates a new quiz on a topic. Use when user wants to create/generate a quiz.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string", "description": "The topic of the quiz"}
+                    "topic": {"type": "string", "description": "The quiz topic"},
+                    "num_questions": {"type": "integer", "description": "Number of questions", "default": 3}
                 },
                 "required": ["topic"]
             }
         }
     },
-    # --- NEW TOOL SCHEMA ---
     {
         "type": "function",
         "function": {
             "name": "launch_quiz_interface",
-            "description": "Launches a visual quiz window for the user to take the quiz. Use this when the user says 'I want to take the quiz' or 'Load the quiz'.",
+            "description": "Opens quiz interface for user to take the quiz.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string", "description": "The topic of the quiz to load"}
+                    "topic": {"type": "string", "description": "The quiz topic to load"}
                 },
                 "required": ["topic"]
             }
@@ -42,63 +46,68 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "review_quiz_interface",
-            "description": "Launches a chat tutor to review quiz results and explain mistakes. Use when user asks 'How did I do?' or 'Review my quiz'.",
+            "description": "Opens chat interface to review quiz results. Use when user asks to review/grade their quiz.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string", "description": "The topic of the quiz to review"}
+                    "topic": {"type": "string", "description": "The quiz topic to review"}
                 },
                 "required": ["topic"]
             }
         }
-    }    
+    }
 ]
 
-# 2. Map Tool Names to Functions
 AVAILABLE_TOOLS = {
     "generate_new_quiz": generate_new_quiz,
     "launch_quiz_interface": launch_quiz_interface,
-    "review_quiz_interface": review_quiz_interface  # <--- Add this
+    "review_quiz_interface": review_quiz_interface
 }
 
+
 def main():
-    print("\n" + "="*50)
-    print("🤖 Orchestrator Initialized")
-    print("="*50)
+    print("\n" + "=" * 50)
+    print("🎓 Quiz App - Multi-Agent Orchestrator")
+    print("=" * 50)
+    print("\nCommands:")
+    print("  • 'Generate a quiz about [topic]'")
+    print("  • 'Take the quiz'")
+    print("  • 'Review my quiz'")
+    print("  • 'quit' to exit")
+    print("=" * 50 + "\n")
     
-    # 1. Setup Connection
     try:
         client, model_id = get_client()
-        print(f"✅ Connected to model: {model_id}\n")
-    except Exception as e:
-        print(f"❌ Connection Failed: {e}")
+        print(f"✅ Connected to: {model_id}\n")
+    except KeyboardInterrupt:
+        print("\n❌ Cancelled. Make sure your model is running first.")
         return
-
-    # 2. Initialize Orchestrator
+    except Exception as e:
+        print(f"❌ Connection failed: {e}")
+        return
+    
     orchestrator = BaseAgent(
-        name="Orchestrator", 
-        client=client, 
-        model_id=model_id, 
+        name="Orchestrator",
+        client=client,
+        model_id=model_id,
         tools=TOOLS_SCHEMA,
-        available_tools=AVAILABLE_TOOLS 
+        available_tools=AVAILABLE_TOOLS
     )
-
-    # 3. Chat Loop
+    
     while True:
         try:
-            user_input = input("👤 User: ").strip()
-            if user_input.lower() in ["quit", "exit"]:
+            user_input = input("👤 You: ").strip()
+            if user_input.lower() in ["quit", "exit", "q"]:
+                print("\n👋 Goodbye!")
                 break
             if not user_input:
                 continue
-
             response = orchestrator.run(user_input)
-            print(f"🤖 Orchestrator: {response}\n")
-            
+            print(f"\n🤖 Assistant: {response}\n")
         except KeyboardInterrupt:
+            print("\n👋 Goodbye!")
             break
-        except Exception as e:
-            print(f"❌ Error: {e}")
+
 
 if __name__ == "__main__":
     main()

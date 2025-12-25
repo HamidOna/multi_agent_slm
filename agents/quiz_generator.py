@@ -1,58 +1,58 @@
-import json
-from .base_agent import BaseAgent
+"""Quiz Generator Agent - Generates quiz questions in JSON format."""
 
-class QuizGeneratorAgent(BaseAgent):
-    def __init__(self, client, model_id):
-        # Initialize BaseAgent (tools=None by default)
-        super().__init__("Generator", client, model_id)
-        
-        # Override system prompt for JSON generation
-        self.system_prompt = """You are a Quiz Generator API.
-You DO NOT write chatty responses. 
-You ONLY output valid JSON.
-Format:
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class QuizGeneratorAgent:
+    """Generates quiz questions on a given topic."""
+    
+    def __init__(self, client, model_id: str):
+        self.client = client
+        self.model_id = model_id
+        self.system_prompt = """You are a Quiz Generator that outputs ONLY valid JSON.
+
+Output format:
 {
-  "topic": "...",
+  "topic": "The quiz topic",
   "questions": [
     {
-      "question": "...",
-      "options": ["A) ...", "B) ...", "C) ..."],
+      "question": "The question text?",
+      "options": ["A) First option", "B) Second option", "C) Third option", "D) Fourth option"],
       "correct": "A"
     }
   ]
-}"""
+}
 
-    def generate(self, topic: str, num_questions: int) -> dict:
-        prompt = f"Create a quiz about '{topic}' with {num_questions} questions."
-        
-        # Prepare messages manually since we are bypassing BaseAgent.run
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": prompt}
-        ]
-        
-        # Call model directly (No tools needed for the Generator itself)
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model_id,
-                messages=messages,
-                temperature=0.1 
-            )
-            
-            content = response.choices[0].message.content.strip()
-            
-            # Cleanup: sometimes models wrap JSON in markdown blocks like ```json ... ```
-            if "```" in content:
-                # Robustly find the start and end of the code block
-                if "```json" in content:
-                    content = content.split("```json")[-1]
-                else:
-                    content = content.split("```")[-1]
-                
-                content = content.split("```")[0].strip()
-            
-            return json.loads(content)
+Rules:
+1. Output ONLY the JSON object - no explanations, no markdown
+2. Each question must have exactly 4 options (A, B, C, D)
+3. The "correct" field must be a single letter (A, B, C, or D)
+"""
 
-        except Exception as e:
-            print(f"❌ Generator Agent Error: {e}")
-            return None
+    def generate(self, topic: str, num_questions: int = 5) -> dict:
+        """Generate a quiz on the given topic."""
+        logger.info(f"[QuizGenerator] Generating {num_questions} questions about '{topic}'...")
+        
+        response = self.client.chat.completions.create(
+            model=self.model_id,
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": f"Create a quiz about '{topic}' with exactly {num_questions} questions."}
+            ],
+            temperature=0.1,
+            max_tokens=2048
+        )
+        
+        content = response.choices[0].message.content.strip()
+        
+        # Remove markdown code fences if present
+        if "```" in content:
+            content = content.split("```json")[-1] if "```json" in content else content.split("```")[-1]
+            content = content.split("```")[0].strip()
+        
+        quiz_data = json.loads(content)
+        logger.info(f"[QuizGenerator] Successfully generated {len(quiz_data['questions'])} questions")
+        return quiz_data
