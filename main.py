@@ -8,6 +8,7 @@ from tools.generator_tools import generate_new_quiz
 from tools.interface_tools import launch_quiz_interface
 from tools.review_tools import review_quiz_interface
 
+# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("gradio").setLevel(logging.WARNING)
@@ -78,13 +79,11 @@ def main():
     
     try:
         client, model_id = get_client()
-        print(f"✅ Connected to: {model_id}\n")
-    except KeyboardInterrupt:
-        print("\n❌ Cancelled. Make sure your model is running first.")
-        return
     except Exception as e:
-        print(f"❌ Connection failed: {e}")
+        print(f"❌ {e}")
         return
+    
+    print(f"✅ Connected to: {model_id}\n")
     
     orchestrator = BaseAgent(
         name="Orchestrator",
@@ -95,18 +94,17 @@ def main():
     )
     
     while True:
-        try:
-            user_input = input("👤 You: ").strip()
-            if user_input.lower() in ["quit", "exit", "q"]:
-                print("\n👋 Goodbye!")
-                break
-            if not user_input:
-                continue
-            response = orchestrator.run(user_input)
-            print(f"\n🤖 Assistant: {response}\n")
-        except KeyboardInterrupt:
+        user_input = input("👤 You: ").strip()
+        
+        if user_input.lower() in ["quit", "exit", "q"]:
             print("\n👋 Goodbye!")
             break
+        
+        if not user_input:
+            continue
+        
+        response = orchestrator.run(user_input)
+        print(f"\n🤖 Assistant: {response}\n")
 
 
 if __name__ == "__main__":
