@@ -28,3 +28,10 @@ data/responses/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Model binaries (too large for git)
+models/
+.olive-cache/
+
+# PDFs
+*.pdf
