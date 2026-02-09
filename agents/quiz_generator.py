@@ -47,7 +47,11 @@ Rules:
         )
         
         content = response.choices[0].message.content.strip()
-        
+
+        # Remove Qwen3 <think> blocks if present
+        import re
+        content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL).strip()
+
         # Remove markdown code fences if present
         if "```" in content:
             content = content.split("```json")[-1] if "```json" in content else content.split("```")[-1]

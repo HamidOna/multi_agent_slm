@@ -17,6 +17,11 @@ class _TextToolCall:
         self.function = type("Fn", (), {"name": name, "arguments": arguments})()
 
 
+def _strip_think_tags(content: str) -> str:
+    """Remove <think>...</think> blocks from Qwen3 output."""
+    return re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL).strip()
+
+
 def _parse_text_tool_calls(content: str) -> list:
     """Parse <tool_call>...</tool_call> tags from model output.
 
@@ -24,7 +29,7 @@ def _parse_text_tool_calls(content: str) -> list:
     models pass them through as raw text. This does the same conversion
     client-side: extract the JSON, return objects matching the OpenAI format.
     """
-    blocks = re.findall(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", content, re.DOTALL)
+    blocks = re.findall(r"<tool_call>\s*(.*?)\s*</tool_call>", content, re.DOTALL)
     calls = []
     for block in blocks:
         try:
@@ -46,7 +51,7 @@ class BaseAgent:
         tools: Optional[List[Dict]] = None,
         available_tools: Optional[Dict] = None,
         max_tokens: int = 2048,
-        temperature: float = 0.0
+        temperature: float = 0.7
     ):
         self.name = name
         self.client = client
@@ -66,7 +71,7 @@ Instructions:
 1. Use the function calling API when a tool is needed - don't write function calls as text
 2. Wait for tool results before responding to the user
 3. Be concise and helpful
-"""
+/no_think"""
 
     def run(self, message: str) -> str:
         """Process user message through tool-calling loop."""
@@ -111,7 +116,7 @@ Instructions:
             if not tool_calls and response_msg.content:
                 tool_calls = _parse_text_tool_calls(response_msg.content) or None
 
-        final_content = response_msg.content or "Task completed."
+        final_content = _strip_think_tags(response_msg.content) if response_msg.content else "Task completed."
         current_turn.append({"role": "assistant", "content": final_content})
         self.history.extend(current_turn)
 

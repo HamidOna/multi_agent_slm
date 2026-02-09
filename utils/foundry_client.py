@@ -13,7 +13,7 @@ try:
 except ImportError:
     FOUNDRY_AVAILABLE = False
 
-DEFAULT_MODEL_ALIAS = "qwen-quiz-int4"
+DEFAULT_MODEL_ALIAS = "qwen3-0.6b-int4"
 
 
 def _discover_endpoint():

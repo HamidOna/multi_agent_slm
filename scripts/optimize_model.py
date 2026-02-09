@@ -1,4 +1,4 @@
-"""Optimize Qwen 2.5 0.5B Instruct to INT4 ONNX using Microsoft Olive.
+"""Optimize Qwen3 0.6B to INT4 ONNX using Microsoft Olive.
 
 Usage:
     python scripts/optimize_model.py
@@ -6,7 +6,7 @@ Usage:
 Downloads the model from HuggingFace, converts to ONNX, and quantizes
 to INT4 using the ONNX Runtime GenAI model builder.
 
-Output: models/qwen2.5-0.5b-int4/
+Output: models/qwen3-0.6b-int4/
 
 Requirements: pip install olive-ai onnxruntime-genai transformers
 """
@@ -15,14 +15,20 @@ import subprocess
 import sys
 from pathlib import Path
 
-MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
-OUTPUT_DIR = "models/qwen2.5-0.5b-int4"
+MODEL_ID = "Qwen/Qwen3-0.6B"
+OUTPUT_DIR = "models/qwen3-0.6b-int4"
 
 
 def ensure_model_local():
-    """Download model to HF cache first (avoids auth issues with model builder)."""
+    """Download model to a local directory (avoids symlink issues on Windows)."""
+    import os
     from huggingface_hub import snapshot_download
-    local_path = snapshot_download(MODEL_ID, token=False)
+
+    os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+    local_dir = Path("models") / "hf-downloads" / MODEL_ID.split("/")[-1]
+    local_path = snapshot_download(
+        MODEL_ID, token=False, local_dir=str(local_dir)
+    )
     print(f"Model cached at: {local_path}")
     return local_path
 
